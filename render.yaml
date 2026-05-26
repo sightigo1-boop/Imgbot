@@ -1,19 +1,15 @@
 services:
-  - type: web
+  - type: worker
     name: telegram-ai-image-bot
     env: python
     plan: free
     runtime: python-3.11
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT
+    startCommand: python main.py
     envVars:
       - key: ENVIRONMENT
         value: production
-      - key: PORT
-        value: 8000
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TOGETHER_API_KEY
-        sync: false
-      - key: WEBHOOK_URL
         sync: false
