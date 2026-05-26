@@ -1,6 +1,5 @@
 import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response, status
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -14,50 +13,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize python-telegram-bot Application instance globally
-tg_app = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
-
-# Register core system commands
-tg_app.add_handler(CommandHandler("start", start_command))
-tg_app.add_handler(CommandHandler("help", help_command))
-
-# Register style specific commands
-tg_app.add_handler(CommandHandler(["anime", "realistic", "cinematic"], handle_style_command))
-
-# Register standard message catchers
-tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_prompt))
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manages FastAPI lifespan hooks - Configures and tears down Webhooks safely."""
-    # Build webhook target endpoint URL structure
-    webhook_url = f"{settings.WEBHOOK_URL}/webhook"
-    logger.info(f"Setting Telegram Webhook URL to: {webhook_url}")
+async def main():
+    """Starts the bot in Long Polling mode (Perfect for Background Workers)."""
+    logger.info("Initializing Telegram Bot in Polling Mode...")
     
-    await tg_app.initialize()
-    await tg_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    
-    yield # API running window frame
-    
-    logger.info("Tearing down application components...")
-    await tg_app.bot.delete_webhook()
-    await tg_app.shutdown()
+    # Initialize python-telegram-bot Application instance
+    tg_app = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
 
-app = FastAPI(lifespan=lifespan)
+    # Register core system commands
+    tg_app.add_handler(CommandHandler("start", start_command))
+    tg_app.add_handler(CommandHandler("help", help_command))
 
-@app.post("/webhook")
-async def telegram_webhook_endpoint(request: Request):
-    """Processes incoming data directly dropped off by Telegram servers."""
+    # Register style specific commands
+    tg_app.add_handler(CommandHandler(["anime", "realistic", "cinematic"], handle_style_command))
+
+    # Register standard message catchers
+    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_prompt))
+
+    # Clear any old webhooks so polling can take over cleanly
+    await tg_app.bot.delete_webhook(drop_pending_updates=True)
+
+    # Start the continuous polling loop
+    logger.info("Bot is now live and listening for messages!")
+    
+    # Run polling loop natively within our async main loop
+    async with tg_app:
+        await tg_app.start()
+        await tg_app.updater.start_polling(drop_pending_updates=True)
+        # Keep running until the process is stopped
+        while True:
+            await asyncio.sleep(3600)
+
+if __name__ == "__main__":
     try:
-        json_data = await request.json()
-        update = Update.de_json(data=json_data, bot=tg_app.bot)
-        await tg_app.process_update(update)
-        return Response(status_code=status.HTTP_200_OK)
-    except Exception as e:
-        logger.error(f"Error parsing incoming updates through API webhook router: {str(e)}")
-        return Response(status_code=status.HTTP_400_BAD_REQUEST)
-
-@app.get("/health")
-async def health_check():
-    """Simple application up-time health check verification routing."""
-    return {"status": "healthy"}
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped cleanly.")
